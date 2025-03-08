@@ -4,6 +4,7 @@ import pygame
 from card import Card, card_vertical_space, layered_card_sprites, card_width, card_height
 from color import Color
 from rank import Rank
+from src.move_meta_data import MoveMetaData
 from suit import Suit
 # from tkinter import Canvas, Event
 import random
@@ -11,6 +12,7 @@ import random
 total_cascade_piles = 8
 total_free_cells = 4
 total_home_cells = 4
+total_previous_moves : int = 5
 
 class FreeCell:
     deck: List[Card] = []
@@ -28,7 +30,9 @@ class FreeCell:
     # Offset of the trailing cards when a bunch of cards are selected with mouse.
     offset_x : List[int] = []
     offset_y : List[int] = []
-    
+
+    previous_moves_stack : [MoveMetaData] = []
+
     def __init__(self):
         for suit in Suit:
             if suit == Suit.ROOT:
@@ -86,13 +90,24 @@ class FreeCell:
                 # by the way none of this detection will require us to check ONLY with the ONE TOP card and not all the cards behind it (in case of home cells)
                 # one way to avoid unnecessary checks is to first check if the pos.y is above the rect.bottom of home and free cell(s) (one cell from each deck should be fine)
                 # else return
-                return
-            self.selected_card = cards[0]
-            self.parent_card = cards[1]
-            
+                # Check if it collides with the free cell
+                fc_rect: pygame.Rect = None
+                index: int = 0
+                for index in range(len(self.free_cell_rects)):
+                    if self.free_cell_rects[index].collidepoint(pos[0], pos[1]):
+                        fc_rect = self.free_cell_rects[index]
+                        break
+
+                if fc_rect != None:
+                    self.selected_card = self.free_cells[index]
+                    self.parent_card = None
+                    self.free_cells[index] = None
+            else:
+                self.selected_card = cards[0]
+                self.parent_card = cards[1]
+
             self.update_card_offset_with_mouse_pos(pos)
             self.bring_selected_card_trail_to_front()
-
             print(f"selected card {self.selected_card.suit}:{self.selected_card.rank}")
         
         if event.type==pygame.MOUSEMOTION:
@@ -112,7 +127,7 @@ class FreeCell:
             rect: pygame.Rect = None  # pygame.Rect(0.0,0.0,0.0,0.0)
             index: int = 0
             for index in range(len(self.cascade_pile_root_rects)):
-                if self.cascade_pile_root_rects[index].collidepoint(pos[0], pos[1]):
+                if pygame.Rect.colliderect(self.cascade_pile_root_rects[index], self.selected_card.rect): #self.cascade_pile_root_rects[index].collidepoint(pos[0], pos[1]):
                     rect = self.cascade_pile_root_rects[index]
                     break
 
@@ -121,7 +136,8 @@ class FreeCell:
                 # If user wishes to place a card or trail of cards on an empty cascade pile slot.
                 if self.cascade_pile_root.children[index] == None and self.is_supermove_legit(index, True):
                     self.cascade_pile_root.children[index] = self.selected_card
-                    self.parent_card.children.remove(self.selected_card)
+                    if self.parent_card != None:
+                        self.parent_card.children.remove(self.selected_card)
                 else:
                     self.snap_pile_to_original_position()
             # placing in either home or free cell
@@ -131,27 +147,29 @@ class FreeCell:
                     # Check if it collides with the free cell
                     fc_rect: pygame.Rect = None
                     for index in range(len(self.free_cell_rects)):
-                        if self.free_cell_rects[index].collidepoint(pos[0], pos[1]):
+                        if pygame.Rect.colliderect(self.free_cell_rects[index], self.selected_card.rect): #self.free_cell_rects[index].collidepoint(pos[0], pos[1]):
                             fc_rect = self.free_cell_rects[index]
                             break
 
                     if fc_rect != None:
                         if self.free_cells[index] == None:
-                            self.parent_card.children.remove(self.selected_card)
+                            if self.parent_card != None:
+                                self.parent_card.children.remove(self.selected_card)
                             self.free_cells[index] = self.selected_card
                             self.snap_selected_card_to_pos(self.free_cell_rects[index])
                     # if no free cell collides then check for home cells
                     else:
                         hc_rect: pygame.Rect = None
                         for index in range(len(self.home_cell_rects)):
-                            if self.home_cell_rects[index].collidepoint(pos[0], pos[1]):
+                            if pygame.Rect.colliderect(self.home_cell_rects[index], self.selected_card.rect): #self.home_cell_rects[index].collidepoint(pos[0], pos[1]):
                                 hc_rect = self.home_cell_rects[index]
                                 break
 
                         if hc_rect != None:
                             # If the home cell is empty then the selected card MUST be ACE.
                             if len(self.home_cells[index]) == 0 and self.selected_card.rank == Rank.ACE:
-                                self.parent_card.children.remove(self.selected_card)
+                                if self.parent_card != None:
+                                    self.parent_card.children.remove(self.selected_card)
                                 self.home_cells[index].append(self.selected_card)
                                 self.snap_selected_card_to_pos(self.home_cell_rects[index])
                             # ELSE check the top most card placed on this home cell.
@@ -162,12 +180,14 @@ class FreeCell:
                                 # it's rank should be one less than the selected card
                                 if (topmost_card.rank == self.selected_card.rank - 1 and
                                         topmost_card.suit == self.selected_card.suit):
-                                    self.parent_card.children.remove(self.selected_card)
+                                    if self.parent_card != None:
+                                        self.parent_card.children.remove(self.selected_card)
                                     self.home_cells[index].append(self.selected_card)
 
                 # more than one card selected to be placed onto a free or home cell.
                 # this is not allowed. snap back to original position.
                 else:
+                    print(f"card not colliding with any rect. snapping to original position.")
                     self.snap_pile_to_original_position()
 
         else:
@@ -184,7 +204,8 @@ class FreeCell:
                     if self.is_supermove_legit(destination_cascade_pile, False):
                         new_pos: pygame.Rect = pygame.Rect(new_parent_card.rect)
                         self.snap_pile_to_pos(new_pos)
-                        self.parent_card.children.remove(self.selected_card)
+                        if self.parent_card != None:
+                            self.parent_card.children.remove(self.selected_card)
                         is_moved = True
                         if len(new_parent_card.children) == 0:
                             new_parent_card.children.append(self.selected_card)
@@ -259,7 +280,6 @@ class FreeCell:
         for card in collided_cards:
             if(card.children == None or len(card.children) == 0):
                 return card
-
 
     def snap_selected_card_to_pos(self, rect: pygame.Rect):
         card : Card = self.selected_card
@@ -349,6 +369,15 @@ class FreeCell:
     # cards in trail = 2^ecpX(efc+1)
         total_cards_allowed : int = (2**total_empty_cascade_piles) * (total_empty_free_cells+1)
         return total_cards_in_trail <= total_cards_allowed
+
+    def add_to_previous_moves_list(self, move_data: MoveMetaData):
+        if len(self.previous_moves_stack) >= total_previous_moves:
+            self.previous_moves_stack.pop(0)
+        self.previous_moves_stack.append(move_data)
+
+    def pop_last_move(self): -> MoveMetaData:
+        if len(self.previous_moves_stack) > 0:
+            self.previous_moves_stack.pop()
 
     # Cards allowed to be moved at once = empty free cells + 1. So, if all 4 free cells are empty then trail of 5 cards can be moved
     # However, this number doubles for every empty cascade pile E.g.- 
