@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 # from tkinter import Image, PhotoImage
 from color import Color
+from src.pile_type import PileType
 from suit import Suit
 from rank import Rank
 from typing import List
@@ -16,6 +17,7 @@ class Card(pygame.sprite.Sprite):
     image_name = ""
     original_rect: pygame.Rect = pygame.Rect(0.0,0.0,0.0,0.0)
     rect: pygame.Rect = None
+    current_pile: PileType = PileType.NONE
 
     def __init__(self,suit:Suit, rank: Rank):
         pygame.sprite.Sprite.__init__(self)
